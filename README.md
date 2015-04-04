@@ -1,2 +1,2 @@
-# spotify-dj
-A remote controlled DJ for Spotify
+# spotd
+A daemon for playing music from Spotify

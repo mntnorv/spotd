@@ -1,11 +1,11 @@
 # App info
-export APPNAME = spotify-dj
+export APPNAME = spotd
 export VERSION = 0.0.1
 export DATE = 2015-04-04
 
 # Filenames
-export EXECUTABLE = spotify-dj
-export MANPAGE = spotify-dj.1
+export EXECUTABLE = spotd
+export MANPAGE = spotd.1
 
 # Libs
 export LIBS = -lspotify -lpthread -lasound
@@ -23,10 +23,10 @@ MANDIR = $(PREFIX)/share/man/man1
 # Dist files
 DIST_PATTERNS = *.[ch] *.sh Makefile
 DIST_DIRS = src
-DIST_FILES = Makefile LICENSE README.md spotify-dj.1 $(foreach dir, $(DIST_DIRS), $(foreach pattern, $(DIST_PATTERNS), $(wildcard $(dir)/$(pattern))))
+DIST_FILES = Makefile LICENSE README.md spotd.1 $(foreach dir, $(DIST_DIRS), $(foreach pattern, $(DIST_PATTERNS), $(wildcard $(dir)/$(pattern))))
 DIST_PATH = dist
-TARNAME = $(DIST_PATH)/$(APPNAME)-$(VERSION)
-TARFILE = $(TARNAME).tar.gz
+TARNAME = $(APPNAME)-$(VERSION)
+TARFILE = $(DIST_PATH)/$(TARNAME).tar.gz
 
 all:
 	mkdir -p "$(LOCAL_BIN_DIR)"
