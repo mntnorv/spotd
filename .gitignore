@@ -33,3 +33,9 @@
 
 # Spotify API key
 src/appkey.c
+
+# Compiled binaries
+bin/
+
+# Dist folder
+dist/

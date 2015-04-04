@@ -1,12 +1,12 @@
 # Compiler flags
-INCLUDES =
+INCLUDES = -I/usr/include/alsa
 DEFINES = -DVERSION=\"$(VERSION)\"
 
 CFLAGS = -g -Wall -Werror $(INCLUDES) $(DEFINES)
 LDFLAGS = $(LIBS)
 
 # Filenames
-SOURCES = main.c appkey.c
+SOURCES = main.c audio.c alsa-audio.c appkey.c
 OBJECTS = $(SOURCES:.c=.o)
 
 all: $(SOURCES) $(EXECUTABLE)

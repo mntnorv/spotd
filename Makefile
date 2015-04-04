@@ -8,7 +8,7 @@ export EXECUTABLE = spotify-dj
 export MANPAGE = spotify-dj.1
 
 # Libs
-export LIBS = -lspotify
+export LIBS = -lspotify -lpthread -lasound
 
 # Compiler
 export CC ?= gcc
@@ -24,7 +24,8 @@ MANDIR = $(PREFIX)/share/man/man1
 DIST_PATTERNS = *.[ch] *.sh Makefile
 DIST_DIRS = src
 DIST_FILES = Makefile LICENSE README.md spotify-dj.1 $(foreach dir, $(DIST_DIRS), $(foreach pattern, $(DIST_PATTERNS), $(wildcard $(dir)/$(pattern))))
-TARNAME = $(APPNAME)-$(VERSION)
+DIST_PATH = dist
+TARNAME = $(DIST_PATH)/$(APPNAME)-$(VERSION)
 TARFILE = $(TARNAME).tar.gz
 
 all:
@@ -44,10 +45,11 @@ test:
 	@$(MAKE) -C tests test
 
 clean:
-	rm -rf "$(LOCAL_BIN_DIR)" "$(TARFILE)"
+	rm -rf "$(LOCAL_BIN_DIR)" "$(DIST_PATH)"
 	@$(MAKE) -C src clean
 
 $(TARFILE): $(DIST_FILES)
+	mkdir -p $(DIST_PATH)
 	rm -rf $(TARFILE) $(TARNAME)
 	mkdir $(TARNAME)
 	rsync -R $(DIST_FILES) $(TARNAME)
