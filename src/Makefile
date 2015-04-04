@@ -6,7 +6,7 @@ CFLAGS = -g -Wall -Werror $(INCLUDES) $(DEFINES)
 LDFLAGS = $(LIBS)
 
 # Filenames
-SOURCES = main.c audio.c alsa-audio.c appkey.c
+SOURCES = main.c audio.c alsa-audio.c server.c appkey.c
 OBJECTS = $(SOURCES:.c=.o)
 
 all: $(SOURCES) $(EXECUTABLE)

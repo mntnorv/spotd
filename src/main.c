@@ -10,7 +10,9 @@
 
 #include <libspotify/api.h>
 
+#include "types.h"
 #include "audio.h"
+#include "server.h"
 
 /* --- Data --- */
 /// The application key is specific to each project, and allows Spotify
@@ -27,63 +29,21 @@ static pthread_mutex_t g_notify_mutex;
 static pthread_cond_t g_notify_cond;
 /// Synchronization variable telling the main thread to process events
 static int g_notify_do;
-/// Non-zero when a track has ended and the jukebox has not yet started a new one
+/// Non-zero when a track has ended and a new one has not been started yet
 static int g_playback_done;
+/// Non-zero when a new track needs to be played
+static int g_play_track;
 /// The global session handle
 static sp_session *g_sess;
 /// Handle to the curren track
 static sp_track *g_currenttrack;
-/// Link of the track that was passed with the -t param
-static char* g_track_link;
+/// Track link to play
+static char *g_track_link;
 
-/* ---------------------------  PLAYBACK CONTROLS  ------------------------- */
-
-/**
- * Stop the currently playing track, if there is one
- */
-static void stop_playback() {
-  audio_fifo_flush(&g_audiofifo);
-
-  if (g_currenttrack != NULL) {
-    sp_session_player_unload(g_sess);
-    g_currenttrack = NULL;
-  }
-}
-
-/**
- * Play a track
- *
- * @param  link  The spotify link to the track
- */
-static sp_error play_track(const char *link_str) {
-  sp_link *link;
-
-  stop_playback();
-
-  printf("Loading \"%s\"...\n", link_str);
-  link = sp_link_create_from_string(link_str);
-  sp_track_add_ref(g_currenttrack = sp_link_as_track(link));
-  sp_link_release(link);
-
-  sp_error track_error = sp_track_error(g_currenttrack);
-
-  if (track_error == SP_ERROR_OK) {
-    printf("Now playing \"%s\"...\n", sp_track_name(g_currenttrack));
-    fflush(stdout);
-    
-    sp_session_player_load(g_sess, g_currenttrack);
-    sp_session_player_play(g_sess, 1);
-  } else if (track_error == SP_ERROR_IS_LOADING) {
-    printf("Loading metadata for \"%s\"...\n", link_str);
-  } else if (track_error == SP_ERROR_OTHER_PERMANENT) {
-    printf("Failed trying to play \"%s\"\n", link_str);
-  }
-
-  /* Track not loaded? Then we need to wait for the metadata to
-     load before we can start playback (see metadata_updated) */
-
-  return sp_track_error(g_currenttrack);
-}
+/* --- Function definitions --- */
+static sp_error play_track(const char *link_str);
+static void stop_playback(void);
+static char *strip_str(const char *str, const char *d);
 
 /* ---------------------------  SESSION CALLBACKS  ------------------------- */
 
@@ -97,8 +57,6 @@ static void logged_in(sp_session *sess, sp_error error) {
     fprintf(stderr, "Login failed: %s\n", sp_error_message(error));
     exit(2);
   }
-
-  play_track(g_track_link);
 }
 
 /**
@@ -238,7 +196,72 @@ static sp_session_config spconfig = {
   NULL,
 };
 
-/* -------------------------  END SESSION CALLBACKS  ----------------------- */
+/* ---------------------------  SERVER CALLBACKS  -------------------------- */
+
+static void client_command_received (const char* command) {
+  g_track_link = strip_str(command, "\r\n");
+  printf("Command received: %s\n", g_track_link);
+
+  pthread_mutex_lock(&g_notify_mutex);
+  g_play_track = 1;
+  pthread_cond_signal(&g_notify_cond);
+  pthread_mutex_unlock(&g_notify_mutex);
+}
+
+static spotd_server_callbacks server_callbacks = {
+  .command_received = &client_command_received,
+};
+
+/* ---------------------------  PLAYBACK CONTROLS  ------------------------- */
+
+/**
+ * Play a track
+ *
+ * @param  link  The spotify link to the track
+ */
+static sp_error play_track(const char *link_str) {
+  sp_link *link;
+
+  stop_playback();
+
+  printf("Loading \"%s\"...\n", link_str);
+  link = sp_link_create_from_string(link_str);
+  sp_track_add_ref(g_currenttrack = sp_link_as_track(link));
+  sp_link_release(link);
+
+  sp_error track_error = sp_track_error(g_currenttrack);
+
+  if (track_error == SP_ERROR_OK) {
+    printf("Now playing \"%s\"...\n", sp_track_name(g_currenttrack));
+    fflush(stdout);
+    
+    sp_session_player_load(g_sess, g_currenttrack);
+    sp_session_player_play(g_sess, 1);
+  } else if (track_error == SP_ERROR_IS_LOADING) {
+    printf("Loading metadata for \"%s\"...\n", link_str);
+  } else if (track_error == SP_ERROR_OTHER_PERMANENT) {
+    printf("Failed trying to play \"%s\"\n", link_str);
+  }
+
+  /* Track not loaded? Then we need to wait for the metadata to
+     load before we can start playback (see metadata_updated) */
+
+  return sp_track_error(g_currenttrack);
+}
+
+/**
+ * Stop the currently playing track, if there is one
+ */
+static void stop_playback(void) {
+  audio_fifo_flush(&g_audiofifo);
+
+  if (g_currenttrack != NULL) {
+    sp_session_player_unload(g_sess);
+    g_currenttrack = NULL;
+  }
+}
+
+/* ---------------------------------  MAIN  -------------------------------- */
 
 /**
  * A track has ended. Remove it from the playlist.
@@ -264,6 +287,29 @@ static void usage(const char *progname) {
   fprintf(stderr, "usage: %s -u <username> -p <password> -t <track>\n", progname);
 }
 
+/**
+ * Remove characters from a string.
+ * The resulting string must be freed.
+ *
+ * @param  str  The string to strip
+ * @param  d  The characters to strip
+ */
+static char *strip_str(const char *str, const char *d) {
+  size_t length = strlen(str);
+  char *stripped = (char *) malloc(length + 1);
+  int stripped_len = 0, i;
+
+  for (i = 0; i < length; i++) {
+    if (!strchr(d, str[i])) {
+      stripped[stripped_len] = str[i];
+      stripped_len++;
+    }
+  }
+
+  stripped[stripped_len] = '\0';
+  return stripped;
+}
+
 int main(int argc, char **argv) {
   sp_session *sp;
   sp_error err;
@@ -272,7 +318,7 @@ int main(int argc, char **argv) {
   const char *password = NULL;
   int opt;
 
-  while ((opt = getopt(argc, argv, "u:p:t:")) != EOF) {
+  while ((opt = getopt(argc, argv, "u:p:")) != EOF) {
     switch (opt) {
     case 'u':
       username = optarg;
@@ -280,20 +326,20 @@ int main(int argc, char **argv) {
     case 'p':
       password = optarg;
       break;
-    case 't':
-      g_track_link = optarg;
-      break;
     default:
       exit(1);
     }
   }
 
-  if (!username || !password || !g_track_link) {
+  if (!username || !password) {
     usage(basename(argv[0]));
     exit(1);
   }
 
   audio_init(&g_audiofifo);
+
+  /* Start server */
+  start_server(8888, &server_callbacks);
 
   /* Create session */
   spconfig.application_key_size = g_appkey_size;
@@ -341,6 +387,12 @@ int main(int argc, char **argv) {
     if (g_playback_done) {
       track_ended();
       g_playback_done = 0;
+    }
+
+    if (g_play_track) {
+      play_track(g_track_link);
+      free(g_track_link);
+      g_play_track = 0;
     }
 
     do {

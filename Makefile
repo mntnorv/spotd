@@ -11,7 +11,7 @@ export MANPAGE = spotd.1
 export LIBS = -lspotify -lpthread -lasound
 
 # Compiler
-export CC ?= gcc
+export CC ?= clang
 
 # Directories
 export LOCAL_BIN_DIR = $(CURDIR)/bin
