@@ -31,6 +31,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <signal.h>
 
 #include <libspotify/api.h>
 
@@ -39,26 +40,31 @@
 #include "server.h"
 
 /* --- Data --- */
-/// The application key is specific to each project, and allows Spotify
-/// to produce statistics on how our service is used.
+// The application key is specific to each project, and allows Spotify
+// to produce statistics on how our service is used.
 extern const uint8_t g_appkey[];
-/// The size of the application key.
+// The size of the application key.
 extern const size_t g_appkey_size;
 
-/// The output queue for audo data
+// The output queue for audo data
 static audio_fifo_t g_audiofifo;
-/// Synchronization mutex for the main thread
+// Synchronization mutex for the main thread
 static pthread_mutex_t g_notify_mutex;
-/// Synchronization condition variable for the main thread
+// Synchronization condition variable for the main thread
 static pthread_cond_t g_notify_cond;
-/// Synchronization variable telling the main thread to process events
+// Synchronization variable telling the main thread to process events
 static int g_notify_do;
-/// Non-zero when a track has ended and a new one has not been started yet
+// Non-zero when a track has ended and a new one has not been started yet
 static int g_playback_done;
-/// The global session handle
+// The global session handle
 static sp_session *g_sess;
-/// Handle to the current track
+// Handle to the current track
 static sp_track *g_currenttrack;
+
+// Set of signals to handle with handle_signals()
+static sigset_t g_handled_signal_set;
+// Synchronization variable telling the main thread to exit
+static int g_interrupted;
 
 /* --- Function definitions --- */
 static spotd_error play_track(const char *link_str);
@@ -313,6 +319,25 @@ static void usage(const char *progname) {
   fprintf(stderr, "usage: %s -u <username> -p <password>\n", progname);
 }
 
+/**
+ * Signal handler thread
+ */
+static void *signal_handler_thread(void *arg) {
+  int sig;
+  for (;;) {
+    sigwait(&g_handled_signal_set, &sig);
+    
+    if (SIGINT == sig) {
+      pthread_mutex_lock(&g_notify_mutex);
+      g_interrupted = 1;
+      pthread_cond_signal(&g_notify_cond);
+      pthread_mutex_unlock(&g_notify_mutex);
+    }
+  }
+
+  pthread_exit(NULL);
+}
+
 int main(int argc, char **argv) {
   sp_session *sp;
   sp_error err;
@@ -320,7 +345,9 @@ int main(int argc, char **argv) {
   const char *username = NULL;
   const char *password = NULL;
   int opt;
+  pthread_t signal_handler_thread_id;
 
+  // Parse options
   while ((opt = getopt(argc, argv, "u:p:")) != EOF) {
     switch (opt) {
     case 'u':
@@ -334,20 +361,29 @@ int main(int argc, char **argv) {
     }
   }
 
+  // Print usage if not all require arguments were passed
   if (!username || !password) {
     usage(basename(argv[0]));
     exit(1);
   }
 
+  // Initialize signal handling
+  g_interrupted = 0;
+  sigemptyset(&g_handled_signal_set);
+  sigaddset(&g_handled_signal_set, SIGINT);
+  pthread_sigmask(SIG_BLOCK, &g_handled_signal_set, NULL);
+  pthread_create(&signal_handler_thread_id, NULL, signal_handler_thread, NULL);
+
+  // Init the audio system
   audio_init(&g_audiofifo);
 
-  /* Start server */
-  if (start_server(8888, &server_callbacks) != SPOTD_ERROR_OK) {
+  // Start server
+  if (spotd_server_start(8888, &server_callbacks) != SPOTD_ERROR_OK) {
     fprintf(stderr, "Error: %s\n", "failed starting a server");
     exit(1);
   }
 
-  /* Create session */
+  // Create session
   spconfig.application_key_size = g_appkey_size;
 
   err = sp_session_create(&spconfig, &sp);
@@ -367,7 +403,7 @@ int main(int argc, char **argv) {
 
   for (;;) {
     if (next_timeout == 0) {
-      while(!g_notify_do && !g_playback_done) {
+      while(!g_notify_do && !g_playback_done && !g_interrupted) {
         pthread_cond_wait(&g_notify_cond, &g_notify_mutex);
       }
     } else {
@@ -387,6 +423,11 @@ int main(int argc, char **argv) {
       pthread_cond_timedwait(&g_notify_cond, &g_notify_mutex, &ts);
     }
 
+    if (g_interrupted) {
+      // Stop execution if interrupted
+      break;
+    }
+
     g_notify_do = 0;
     pthread_mutex_unlock(&g_notify_mutex);
 
@@ -401,6 +442,9 @@ int main(int argc, char **argv) {
 
     pthread_mutex_lock(&g_notify_mutex);
   }
+
+  // Cleanup
+  spotd_server_stop();
 
   return 0;
 }

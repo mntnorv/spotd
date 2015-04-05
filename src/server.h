@@ -27,14 +27,23 @@
 #ifndef _SPOTD_SERVER_H_
 #define _SPOTD_SERVER_H_
 
+#include <pthread.h>
 #include "types.h"
+#include "queue.h"
 
 /* --- Types --- */
-typedef struct spotd_server_callbacks_t {
+typedef struct spotd_server_callbacks {
   void (*command_received)(spotd_command* command);
 } spotd_server_callbacks;
 
+typedef struct client_thread {
+  LIST_ENTRY(client_thread) link;
+  pthread_t thread_id;
+  int socket_desc;
+} client_thread_t;
+
 /* --- Functions --- */
-spotd_error start_server(int port, spotd_server_callbacks *callbacks);
+spotd_error spotd_server_start(int port, spotd_server_callbacks *callbacks);
+void spotd_server_stop();
 
 #endif /* _SPOTD_SERVER_H_ */
