@@ -208,7 +208,7 @@ static void *server_thread(void *socket_desc) {
     
     pthread_mutex_unlock(&g_client_threads_mutex);
 
-    printf("Joining thread %u...\n", first_thread_id);
+    puts("Joining thread...");
     pthread_join(first_thread_id, NULL);
   }
 
@@ -263,15 +263,14 @@ static int create_new_client_thread(int client_sock_desc) {
 static void *connection_handler(void *thread_void_ptr) {
   client_thread_t *thread = (client_thread_t*) thread_void_ptr;
   int sock = thread->socket_desc;
-  int read_size;
+  int read_size, need_detach;
   char message_buf[2000], client_message[2000], *message;
   spotd_command *command;
 
   struct pollfd pfds[2];
 
-  // Detach the thread, so that the resources a freed to the system upon
-  // termination, without the need to pthread_join
-  pthread_detach(pthread_self());
+  // Initialize need_detach to true
+  need_detach = 1;
 
   // Make the client socket non-blocking
   fcntl(sock, F_SETFL, O_NONBLOCK);
@@ -295,6 +294,8 @@ static void *connection_handler(void *thread_void_ptr) {
     if (pfds[1].revents) {
       // There's an event in the pipe, stop the polling loop
       puts("Disconnecting client...");
+      // Thread doesn't need to be detached, it will be joined
+      need_detach = 0;
       break;
     } else if (pfds[0].revents) {
       // There are events in the client socket, receive the message from the client
@@ -333,6 +334,11 @@ static void *connection_handler(void *thread_void_ptr) {
       // clear the message buffer
       memset(client_message, 0, 2000);
     }
+  }
+
+  // Detach the thread if it will not be joined
+  if (need_detach) {
+    pthread_detach(pthread_self());
   }
 
   // Cleanup
