@@ -30,7 +30,8 @@
 typedef enum spotd_error {
   SPOTD_ERROR_OK              = 0, // No errors encountered
   SPOTD_ERROR_BIND_FAILED     = 1, // Server bind call failed
-  SPOTD_ERROR_OTHER_PERMANENT = 2  // Some other error occurred, and it is permanent
+  SPOTD_ERROR_OTHER_PERMANENT = 2, // Some other error occurred, and it is permanent
+  SPOTD_ERROR_INVALID_LINK    = 3  // Invalid Spotify link
 } spotd_error;
 
 typedef enum spotd_command_type {

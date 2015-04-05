@@ -61,7 +61,7 @@ static sp_session *g_sess;
 static sp_track *g_currenttrack;
 
 /* --- Function definitions --- */
-static sp_error play_track(const char *link_str);
+static spotd_error play_track(const char *link_str);
 static void stop_playback(void);
 
 /* ---------------------------  SESSION CALLBACKS  ------------------------- */
@@ -238,13 +238,19 @@ static spotd_server_callbacks server_callbacks = {
  *
  * @param  link  The spotify link to the track
  */
-static sp_error play_track(const char *link_str) {
+static spotd_error play_track(const char *link_str) {
   sp_link *link;
 
   stop_playback();
 
   printf("Loading \"%s\"...\n", link_str);
   link = sp_link_create_from_string(link_str);
+
+  if (link == NULL) {
+    fprintf(stderr, "Error: \"%s\" is not a valid Spotify track link\n", link_str);
+    return SPOTD_ERROR_INVALID_LINK;
+  }
+
   sp_track_add_ref(g_currenttrack = sp_link_as_track(link));
   sp_link_release(link);
 
@@ -260,12 +266,13 @@ static sp_error play_track(const char *link_str) {
     printf("Loading metadata for \"%s\"...\n", link_str);
   } else if (track_error == SP_ERROR_OTHER_PERMANENT) {
     printf("Failed trying to play \"%s\"\n", link_str);
+    return SPOTD_ERROR_OTHER_PERMANENT;
   }
 
   /* Track not loaded? Then we need to wait for the metadata to
      load before we can start playback (see metadata_updated) */
 
-  return sp_track_error(g_currenttrack);
+  return SPOTD_ERROR_OK;
 }
 
 /**
