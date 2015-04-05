@@ -67,9 +67,6 @@ install:
 
 dist: clean $(TARFILE)
 
-test:
-	@$(MAKE) -C tests test
-
 clean:
 	rm -rf "$(LOCAL_BIN_DIR)" "$(DIST_PATH)"
 	@$(MAKE) -C src clean

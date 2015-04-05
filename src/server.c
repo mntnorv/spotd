@@ -56,25 +56,34 @@ static void *connection_handler(void *socket_desc);
  */
 spotd_error start_server(int port, spotd_server_callbacks *callbacks) {
   int socket_desc, *socket_desc_copy;
+  int yes = 1;
   struct sockaddr_in server;
+  pthread_t server_thread_id;
 
   g_callbacks = callbacks;
 
   // Create socket
   socket_desc = socket(AF_INET, SOCK_STREAM, 0);
   if (socket_desc == -1) {
-    printf("Could not create socket");
+    perror("Could not create socket");
     return SPOTD_ERROR_OTHER_PERMANENT;
   }
   puts("Socket created");
+
+  // Set socket options
+  if (setsockopt(socket_desc, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+    perror("Failed setting server socket options");
+    return SPOTD_ERROR_OTHER_PERMANENT;
+  }
 
   // Prepare the sockaddr_in structure
   server.sin_family = AF_INET;
   server.sin_addr.s_addr = INADDR_ANY;
   server.sin_port = htons( port );
+  memset(&(server.sin_zero), 0, 8);
 
   // Bind
-  if (bind(socket_desc,(struct sockaddr *)&server, sizeof(server)) < 0) {
+  if (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0) {
     // Print the error message
     perror("Bind failed. Error");
     return SPOTD_ERROR_BIND_FAILED;
@@ -82,8 +91,6 @@ spotd_error start_server(int port, spotd_server_callbacks *callbacks) {
   puts("bind done");
 
   // Start the server thread
-  pthread_t server_thread_id;
-
   socket_desc_copy = (int *)malloc(sizeof(int));
   *socket_desc_copy = socket_desc;
 
@@ -104,21 +111,16 @@ static void *server_thread(void *socket_desc) {
   int sock = *(int*)socket_desc;
   int client_sock, c;
   struct sockaddr_in client;
+  pthread_t last_client_thread_id;
 
   free(socket_desc);
 
   // Listen
   listen(sock, 3);
 
-  // Accept and incoming connection
+  // Accept incoming connections
   puts("Waiting for incoming connections...");
   c = sizeof(struct sockaddr_in);
-
-  // Accept and incoming connection
-  puts("Waiting for incoming connections...");
-  c = sizeof(struct sockaddr_in);
-
-  pthread_t thread_id;
 
   while ((client_sock = accept(sock, (struct sockaddr *)&client, (socklen_t*)&c))) {
     puts("Connection accepted");
@@ -126,9 +128,9 @@ static void *server_thread(void *socket_desc) {
     int *client_sock_copy = (int *)malloc(sizeof(int));
     *client_sock_copy = client_sock;
 
-    if (pthread_create(&thread_id, NULL, connection_handler, (void*) client_sock_copy) < 0) {
+    if (pthread_create(&last_client_thread_id, NULL, connection_handler, (void*) client_sock_copy) < 0) {
       perror("could not create thread");
-      return 0;
+      pthread_exit(NULL);
     }
 
     // Now join the thread, so that we dont terminate before the thread
@@ -138,10 +140,10 @@ static void *server_thread(void *socket_desc) {
 
   if (client_sock < 0) {
     perror("accept failed");
-    return 0;
+    pthread_exit(NULL);
   }
 
-  return 0;
+  pthread_exit(NULL);
 }
 
 /**
@@ -157,6 +159,7 @@ static void *connection_handler(void *socket_desc) {
   spotd_command *command;
 
   free(socket_desc);
+  pthread_detach(pthread_self());
 
   // Send some messages to the client
   snprintf(message_buf, 2000, "spotd v%s\n", VERSION);
@@ -195,7 +198,8 @@ static void *connection_handler(void *socket_desc) {
     perror("recv failed");
   }
 
-  return 0;
+  close(sock);
+  pthread_exit(NULL);
 }
 
 /**

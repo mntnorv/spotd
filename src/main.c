@@ -57,7 +57,7 @@ static int g_notify_do;
 static int g_playback_done;
 /// The global session handle
 static sp_session *g_sess;
-/// Handle to the curren track
+/// Handle to the current track
 static sp_track *g_currenttrack;
 
 /* --- Function definitions --- */
@@ -210,7 +210,7 @@ static sp_session_config spconfig = {
   .tracefile = NULL,
   .application_key = g_appkey,
   .application_key_size = 0, // Set in main()
-  .user_agent = "spotify-playtrack-example",
+  .user_agent = "spotd",
   .callbacks = &session_callbacks,
   NULL,
 };
@@ -342,7 +342,10 @@ int main(int argc, char **argv) {
   audio_init(&g_audiofifo);
 
   /* Start server */
-  start_server(8888, &server_callbacks);
+  if (start_server(8888, &server_callbacks) != SPOTD_ERROR_OK) {
+    fprintf(stderr, "Error: %s\n", "failed starting a server");
+    exit(1);
+  }
 
   /* Create session */
   spconfig.application_key_size = g_appkey_size;
