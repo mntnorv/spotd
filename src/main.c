@@ -1,7 +1,31 @@
-#include <errno.h>
+/*
+ * The MIT License (MIT)
+ * 
+ * Copyright (c) 2015 Mantas Norvaiša
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * This file is part of spotd.
+ */
+
 #include <libgen.h>
 #include <pthread.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,19 +55,14 @@ static pthread_cond_t g_notify_cond;
 static int g_notify_do;
 /// Non-zero when a track has ended and a new one has not been started yet
 static int g_playback_done;
-/// Non-zero when a new track needs to be played
-static int g_play_track;
 /// The global session handle
 static sp_session *g_sess;
 /// Handle to the curren track
 static sp_track *g_currenttrack;
-/// Track link to play
-static char *g_track_link;
 
 /* --- Function definitions --- */
 static sp_error play_track(const char *link_str);
 static void stop_playback(void);
-static char *strip_str(const char *str, const char *d);
 
 /* ---------------------------  SESSION CALLBACKS  ------------------------- */
 
@@ -198,14 +217,14 @@ static sp_session_config spconfig = {
 
 /* ---------------------------  SERVER CALLBACKS  -------------------------- */
 
-static void client_command_received (const char* command) {
-  g_track_link = strip_str(command, "\r\n");
-  printf("Command received: %s\n", g_track_link);
+static void client_command_received (spotd_command *command) {
+  switch (command->type) {
+  case SPOTD_COMMAND_PLAY_TRACK:
+    play_track(command->argv[0]);
+    break;
+  }
 
-  pthread_mutex_lock(&g_notify_mutex);
-  g_play_track = 1;
-  pthread_cond_signal(&g_notify_cond);
-  pthread_mutex_unlock(&g_notify_mutex);
+  spotd_command_release(command);
 }
 
 static spotd_server_callbacks server_callbacks = {
@@ -284,30 +303,7 @@ static void track_ended(void) {
  * @param  progname  The program name
  */
 static void usage(const char *progname) {
-  fprintf(stderr, "usage: %s -u <username> -p <password> -t <track>\n", progname);
-}
-
-/**
- * Remove characters from a string.
- * The resulting string must be freed.
- *
- * @param  str  The string to strip
- * @param  d  The characters to strip
- */
-static char *strip_str(const char *str, const char *d) {
-  size_t length = strlen(str);
-  char *stripped = (char *) malloc(length + 1);
-  int stripped_len = 0, i;
-
-  for (i = 0; i < length; i++) {
-    if (!strchr(d, str[i])) {
-      stripped[stripped_len] = str[i];
-      stripped_len++;
-    }
-  }
-
-  stripped[stripped_len] = '\0';
-  return stripped;
+  fprintf(stderr, "usage: %s -u <username> -p <password>\n", progname);
 }
 
 int main(int argc, char **argv) {
@@ -387,12 +383,6 @@ int main(int argc, char **argv) {
     if (g_playback_done) {
       track_ended();
       g_playback_done = 0;
-    }
-
-    if (g_play_track) {
-      play_track(g_track_link);
-      free(g_track_link);
-      g_play_track = 0;
     }
 
     do {

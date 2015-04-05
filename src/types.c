@@ -24,32 +24,46 @@
  * This file is part of spotd.
  */
 
-#ifndef _SPOTD_AUDIO_H_
-#define _SPOTD_AUDIO_H_
+#include "types.h"
 
-#include <pthread.h>
-#include <stdint.h>
-#include "queue.h"
+#include <stdlib.h>
 
-/* --- Types --- */
-typedef struct audio_fifo_data {
-	TAILQ_ENTRY(audio_fifo_data) link;
-	int channels;
-	int rate;
-	int nsamples;
-	int16_t samples[0];
-} audio_fifo_data_t;
+/**
+ * Create a new spotd_command object
+ *
+ * @param  type  Type of the command
+ * @param  argc  Number of arguments
+ * @param  argv  The array of arguments. Both the array and each argument need
+ *   to be allocated with malloc(), because they will be freed with free() when
+ *   spotd_command_release is called.
+ * @return  The new spotd_command. The command must be freed with
+ *   spotd_command_release() when it is not used anymore.
+ */
+spotd_command *spotd_command_create(spotd_command_type type, int argc, char **argv) {
+  spotd_command *command;
 
-typedef struct audio_fifo {
-	TAILQ_HEAD(, audio_fifo_data) q;
-	int qlen;
-	pthread_mutex_t mutex;
-	pthread_cond_t cond;
-} audio_fifo_t;
+  command = (spotd_command *) malloc(sizeof(spotd_command));
+  command->type = type;
+  command->argc = argc;
+  command->argv = argv;
 
-/* --- Functions --- */
-extern void audio_init(audio_fifo_t *af);
-extern void audio_fifo_flush(audio_fifo_t *af);
-audio_fifo_data_t* audio_get(audio_fifo_t *af);
+  return command;
+}
 
-#endif /* _SPOTD_AUDIO_H_ */
+/**
+ * Free the memory allocated for a spotd_command.
+ *
+ * @param  command  The command to free
+ */
+void spotd_command_release(spotd_command *command) {
+  int i;
+
+  if (command->argv != NULL) {
+    for(i = 0; i < command->argc; i++) {
+      free(command->argv[i]);
+    }
+    free(command->argv);
+  }
+
+  free(command);
+}

@@ -19,10 +19,9 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  *
- *
  * ALSA audio output driver.
  *
- * This file is part of the libspotify examples suite.
+ * This file is part of spotd.
  */
 
 #include <asoundlib.h>
@@ -225,4 +224,3 @@ void audio_init(audio_fifo_t *af)
 
 	pthread_create(&tid, NULL, alsa_audio_start, af);
 }
-
