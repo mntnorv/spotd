@@ -58,8 +58,14 @@ static int g_notify_do;
 static int g_playback_done;
 // The global session handle
 static sp_session *g_sess;
+// The session playlist container
+static sp_playlistcontainer *g_playlistcontainer;
 // Handle to the current track
-static sp_track *g_currenttrack;
+static sp_track *g_current_track;
+// Handle to the queued track
+static sp_track *g_queued_track;
+// Handle to the command to be executed
+static spotd_command *g_command;
 
 // Set of signals to handle with handle_signals()
 static sigset_t g_handled_signal_set;
@@ -67,7 +73,8 @@ static sigset_t g_handled_signal_set;
 static int g_interrupted;
 
 /* --- Function definitions --- */
-static spotd_error play_track(const char *link_str);
+static sp_track *track_from_link(const char *link_str);
+static spotd_error play_track(sp_track *track);
 static void stop_playback(void);
 
 /* ---------------------------  SESSION CALLBACKS  ------------------------- */
@@ -82,6 +89,8 @@ static void logged_in(sp_session *sess, sp_error error) {
     fprintf(stderr, "Login failed: %s\n", sp_error_message(error));
     exit(2);
   }
+
+  g_playlistcontainer = sp_session_playlistcontainer(sess);
 }
 
 /**
@@ -90,17 +99,10 @@ static void logged_in(sp_session *sess, sp_error error) {
  * @sa sp_session_callbacks#metadata_updated
  */
 static void metadata_updated(sp_session *sess) {
-  puts("Metadata updated, trying to start playback");
-
-  if (sp_track_error(g_currenttrack) != SP_ERROR_OK) {
-    return;
+  if (g_queued_track != NULL && g_current_track != g_queued_track) {
+    play_track(g_queued_track);
+    g_queued_track = NULL;
   }
-
-  printf("Now playing \"%s\"...\n", sp_track_name(g_currenttrack));
-  fflush(stdout);
-
-  sp_session_player_load(g_sess, g_currenttrack);
-  sp_session_player_play(g_sess, 1);
 }
 
 /**
@@ -211,8 +213,8 @@ static sp_session_callbacks session_callbacks = {
  */
 static sp_session_config spconfig = {
   .api_version = SPOTIFY_API_VERSION,
-  .cache_location = "/tmp",
-  .settings_location = "/tmp",
+  .cache_location = "/tmp/spotd",
+  .settings_location = "/tmp/spotd",
   .tracefile = NULL,
   .application_key = g_appkey,
   .application_key_size = 0, // Set in main()
@@ -223,14 +225,16 @@ static sp_session_config spconfig = {
 
 /* ---------------------------  SERVER CALLBACKS  -------------------------- */
 
+/**
+ * This callback handles commands received from clients
+ *
+ * @param  command  Command received from a client
+ */
 static void client_command_received (spotd_command *command) {
-  switch (command->type) {
-  case SPOTD_COMMAND_PLAY_TRACK:
-    play_track(command->argv[0]);
-    break;
-  }
-
-  spotd_command_release(command);
+  pthread_mutex_lock(&g_notify_mutex);
+  g_command = command;
+  pthread_cond_signal(&g_notify_cond);
+  pthread_mutex_unlock(&g_notify_mutex);
 }
 
 static spotd_server_callbacks server_callbacks = {
@@ -240,39 +244,56 @@ static spotd_server_callbacks server_callbacks = {
 /* ---------------------------  PLAYBACK CONTROLS  ------------------------- */
 
 /**
- * Play a track
+ * Creates an sp_track from a Spotify track link
  *
- * @param  link  The spotify link to the track
+ * @param  link_str  The Spotify track link
+ * @return an sp_track if the link passed was a valid link, NULL otherwise
  */
-static spotd_error play_track(const char *link_str) {
+static sp_track *track_from_link(const char *link_str) {
   sp_link *link;
+  sp_track *track;
 
-  stop_playback();
-
-  printf("Loading \"%s\"...\n", link_str);
   link = sp_link_create_from_string(link_str);
 
   if (link == NULL) {
     fprintf(stderr, "Error: \"%s\" is not a valid Spotify track link\n", link_str);
-    return SPOTD_ERROR_INVALID_LINK;
+    return NULL;
   }
 
-  sp_track_add_ref(g_currenttrack = sp_link_as_track(link));
+  sp_track_add_ref(track = sp_link_as_track(link));
   sp_link_release(link);
 
-  sp_error track_error = sp_track_error(g_currenttrack);
+  return track;
+}
+
+/**
+ * Play a track
+ *
+ * @param  link  The spotify link to the track
+ */
+static spotd_error play_track(sp_track *track) {
+  sp_error track_error;
+
+  if (g_current_track && g_current_track == track) {
+    return SPOTD_ERROR_OK;
+  }
+
+  stop_playback();
+
+  track_error = sp_track_error(track);
 
   if (track_error == SP_ERROR_OK) {
-    printf("Now playing \"%s\"...\n", sp_track_name(g_currenttrack));
-    fflush(stdout);
+    g_current_track = track;
+    printf("Now playing \"%s\"...\n", sp_track_name(track));
     
-    sp_session_player_load(g_sess, g_currenttrack);
+    sp_session_player_load(g_sess, g_current_track);
     sp_session_player_play(g_sess, 1);
-  } else if (track_error == SP_ERROR_IS_LOADING) {
-    printf("Loading metadata for \"%s\"...\n", link_str);
   } else if (track_error == SP_ERROR_OTHER_PERMANENT) {
-    printf("Failed trying to play \"%s\"\n", link_str);
+    printf("Failed trying to play track\n");
     return SPOTD_ERROR_OTHER_PERMANENT;
+  } else if (track_error == SP_ERROR_IS_LOADING) {
+    printf("Loading metadata for track...\n");
+    g_queued_track = track;
   }
 
   /* Track not loaded? Then we need to wait for the metadata to
@@ -285,11 +306,11 @@ static spotd_error play_track(const char *link_str) {
  * Stop the currently playing track, if there is one
  */
 static void stop_playback(void) {
-  audio_fifo_flush(&g_audiofifo);
-
-  if (g_currenttrack != NULL) {
+  if (g_current_track != NULL) {
+    audio_fifo_flush(&g_audiofifo);
     sp_session_player_unload(g_sess);
-    g_currenttrack = NULL;
+    sp_track_release(g_current_track);
+    g_current_track = NULL;
   }
 }
 
@@ -302,11 +323,11 @@ static void stop_playback(void) {
  * g_playback_done.
  */
 static void track_ended(void) {
-  if (g_currenttrack) {
-    printf("\"%s\" ended\n", sp_track_name(g_currenttrack));
+  if (g_current_track) {
+    printf("\"%s\" ended\n", sp_track_name(g_current_track));
 
-    sp_track_release(g_currenttrack);
-    g_currenttrack = NULL;
+    sp_track_release(g_current_track);
+    g_current_track = NULL;
   }
 }
 
@@ -341,6 +362,7 @@ static void *signal_handler_thread(void *arg) {
 int main(int argc, char **argv) {
   sp_session *sp;
   sp_error err;
+  sp_track *track;
   int next_timeout = 0;
   const char *username = NULL;
   const char *password = NULL;
@@ -366,6 +388,10 @@ int main(int argc, char **argv) {
     usage(basename(argv[0]));
     exit(1);
   }
+
+  // Init global variables
+  g_current_track = NULL;
+  g_queued_track = NULL;
 
   // Initialize signal handling
   g_interrupted = 0;
@@ -403,7 +429,7 @@ int main(int argc, char **argv) {
 
   for (;;) {
     if (next_timeout == 0) {
-      while(!g_notify_do && !g_playback_done && !g_interrupted) {
+      while(!g_notify_do && !g_playback_done && !g_interrupted && (g_command == NULL)) {
         pthread_cond_wait(&g_notify_cond, &g_notify_mutex);
       }
     } else {
@@ -423,17 +449,34 @@ int main(int argc, char **argv) {
       pthread_cond_timedwait(&g_notify_cond, &g_notify_mutex, &ts);
     }
 
+    g_notify_do = 0;
+    pthread_mutex_unlock(&g_notify_mutex);
+
     if (g_interrupted) {
       // Stop execution if interrupted
       break;
     }
 
-    g_notify_do = 0;
-    pthread_mutex_unlock(&g_notify_mutex);
-
     if (g_playback_done) {
       track_ended();
       g_playback_done = 0;
+    }
+
+    if (g_command != NULL) {
+      switch (g_command->type) {
+      case SPOTD_COMMAND_PLAY_TRACK:
+        track = track_from_link(g_command->argv[0]);
+        if (track != NULL) {
+          play_track(track);
+        }
+        break;
+      case SPOTD_COMMAND_STOP:
+        stop_playback();
+        break;
+      }
+
+      spotd_command_release(g_command);
+      g_command = NULL;
     }
 
     do {
@@ -444,7 +487,11 @@ int main(int argc, char **argv) {
   }
 
   // Cleanup
+  stop_playback();
   spotd_server_stop();
+  sp_playlistcontainer_release(g_playlistcontainer);
+  sp_session_logout(g_sess);
+  sp_session_release(g_sess);
 
   return 0;
 }

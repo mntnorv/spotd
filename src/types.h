@@ -30,12 +30,12 @@
 typedef enum spotd_error {
   SPOTD_ERROR_OK              = 0, // No errors encountered
   SPOTD_ERROR_BIND_FAILED     = 1, // Server bind call failed
-  SPOTD_ERROR_OTHER_PERMANENT = 2, // Some other error occurred, and it is permanent
-  SPOTD_ERROR_INVALID_LINK    = 3  // Invalid Spotify link
+  SPOTD_ERROR_OTHER_PERMANENT = 2  // Some other error occurred, and it is permanent
 } spotd_error;
 
 typedef enum spotd_command_type {
-  SPOTD_COMMAND_PLAY_TRACK = 0 // Play a given track
+  SPOTD_COMMAND_PLAY_TRACK = 0, // Play a given track
+  SPOTD_COMMAND_STOP       = 1  // Stop playback
 } spotd_command_type;
 
 typedef struct spotd_command {
